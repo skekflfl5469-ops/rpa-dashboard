@@ -5,6 +5,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 from datetime import datetime, timedelta, date
+from zoneinfo import ZoneInfo
+
+# 서버 위치와 무관하게 항상 한국 시간 기준으로 동작
+def now_kst():
+    return datetime.now(ZoneInfo("Asia/Seoul")).replace(tzinfo=None)
 import base64
 import os
 
@@ -117,7 +122,7 @@ if not st.session_state.logged_in:
 def load_rpa_complete_data(start_date, end_date, seed_val=42):
     np.random.seed(seed_val)
     error_types = ["WebAutomation.LaunchEdgeError", "Excel.OpenWorkbookError", "Outlook.SendMailError", "File.NotFoundError", "Network.ConnectionTimeout"]
-    now = datetime.now()
+    now = now_kst()
     curr_today = now.date()
 
     raw_data = [
@@ -199,7 +204,7 @@ def load_rpa_complete_data(start_date, end_date, seed_val=42):
 # ==========================================
 # 4. 메인 로직 및 대시보드 구성
 # ==========================================
-today = datetime.now().date()
+today = now_kst().date()
 if 's_date' not in st.session_state: st.session_state.s_date = today - timedelta(days=6)
 if 'e_date' not in st.session_state: st.session_state.e_date = today
 
@@ -252,7 +257,23 @@ with col_right:
     m_col[2].metric("총 실패 건수", f"{total_fail}건")
 
 st.markdown("<hr>", unsafe_allow_html=True)
-st.write(f"#### 📋 항목별 구동 현황 ({st.session_state.s_date} ~ {st.session_state.e_date})")
+
+title_col, dl_col = st.columns([5, 1], vertical_alignment="center")
+title_col.write(f"#### 📋 항목별 구동 현황 ({st.session_state.s_date} ~ {st.session_state.e_date})")
+
+# 조회 기간의 건별 실행 이력을 로그 파일로 다운로드
+if not f_df.empty:
+    log_df = f_df.copy()
+    log_df['날짜'] = log_df['날짜'].astype(str)
+    log_df = log_df.sort_values(['날짜', '수행시간'])[['날짜', '수행시간', 'RPA명', '실행주기', '주관부서', '상태', '구동시간', '에러내용']]
+    log_df = log_df.rename(columns={'구동시간': '구동시간(초)'})
+    log_csv = log_df.to_csv(index=False).encode('utf-8-sig')
+    dl_col.download_button(
+        "📥 로그 다운로드",
+        data=log_csv,
+        file_name=f"rpa_log_{st.session_state.s_date}_{st.session_state.e_date}.csv",
+        mime="text/csv"
+    )
 
 def get_agg_row(group):
     succ_count = len(group[group['상태'] == '성공'])
