@@ -73,7 +73,7 @@ def login():
     ALLOWED_USERS = {
         "pulmuone": "rpa1234",
         "yhwoo": "yhwoo",
-        "guest": "1234"
+        "guest": "1234",
         "ysleea": "ysleea"
     }
 
