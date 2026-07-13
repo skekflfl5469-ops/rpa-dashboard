@@ -72,8 +72,9 @@ if 'user_id' not in st.session_state:
 def login():
     ALLOWED_USERS = {
         "pulmuone": "rpa1234",
-        "yhwoo": "dudgns23!",
+        "yhwoo": "yhwoo",
         "guest": "1234"
+        "ysleea": "ysleea"
     }
 
     st.markdown("""
