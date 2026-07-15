@@ -234,11 +234,30 @@ today = now_kst().date()
 if 's_date' not in st.session_state: st.session_state.s_date = today - timedelta(days=6)
 if 'e_date' not in st.session_state: st.session_state.e_date = today
 
-data_source = "시뮬레이션"
-if "nas" in st.secrets:
+def nas_configured():
+    """Secrets에 [nas] 설정이 있는지 확인 (secrets 파일이 아예 없는 로컬 환경도 안전하게 처리)"""
     try:
-        f_df = load_rpa_log_from_nas(st.session_state.s_date, st.session_state.e_date)
-        data_source = "NAS 실데이터"
+        return "nas" in st.secrets
+    except Exception:
+        return False
+
+data_source = "시뮬레이션"
+if nas_configured():
+    try:
+        nas_df = load_rpa_log_from_nas(st.session_state.s_date, st.session_state.e_date)
+        real_tasks = list(st.secrets["nas"].get("real_tasks", []))
+
+        if real_tasks:
+            # 혼합 모드: 지정 업무만 NAS 실데이터, 나머지는 시뮬레이션 유지
+            nas_df = nas_df[nas_df['RPA명'].isin(real_tasks)]
+            sim_df = load_rpa_complete_data(st.session_state.s_date, st.session_state.e_date)
+            sim_df = sim_df[~sim_df['RPA명'].isin(real_tasks)]
+            f_df = pd.concat([nas_df, sim_df], ignore_index=True).sort_values(['날짜', '수행시간']).reset_index(drop=True)
+            data_source = f"혼합 (실데이터 {len(real_tasks)}개 업무 + 시뮬레이션)"
+        else:
+            # 전체 실데이터 모드
+            f_df = nas_df
+            data_source = "NAS 실데이터"
     except Exception as ex:
         st.warning(f"NAS 로그를 불러오지 못해 시뮬레이션 데이터로 표시합니다. ({type(ex).__name__})")
         f_df = load_rpa_complete_data(st.session_state.s_date, st.session_state.e_date)
@@ -363,6 +382,67 @@ else:
     </tr>"""
     table_html += "</tbody></table>"
     st.write(table_html, unsafe_allow_html=True)
+
+    # ==========================================
+    # 상세 내역: 업무 선택 시 건별 실행 이력 표시
+    # ==========================================
+    with st.expander("🔍 RPA 상세 내역 보기 (업무별 실행 이력)"):
+        sel_rpa = st.selectbox("업무 선택", agg_df['RPA명'].tolist(), key="detail_rpa_select")
+        detail = f_df[f_df['RPA명'] == sel_rpa].sort_values(['날짜', '수행시간']).reset_index(drop=True)
+
+        d_succ = len(detail[detail['상태'] == '성공'])
+        d_fail = len(detail[detail['상태'] == '오류'])
+        d_avg = int(detail[detail['상태'] == '성공']['구동시간'].mean()) if d_succ > 0 else 0
+
+        dm = st.columns(4)
+        dm[0].metric("총 실행", f"{len(detail)}건")
+        dm[1].metric("성공", f"{d_succ}건")
+        dm[2].metric("실패", f"{d_fail}건")
+        dm[3].metric("평균 구동시간", f"{d_avg}초")
+
+        # 날짜별 성공/실패 추이 라인
+        if detail['날짜'].nunique() > 1:
+            d_trend = detail.groupby('날짜_표시').apply(
+                lambda x: pd.Series({'성공': len(x[x['상태'] == '성공']), '실패': len(x[x['상태'] == '오류'])}),
+                include_groups=False).reset_index()
+            fig_detail = go.Figure()
+            fig_detail.add_trace(go.Scatter(x=d_trend['날짜_표시'], y=d_trend['성공'], name='성공', mode='lines+markers', line=dict(color='#28a745')))
+            fig_detail.add_trace(go.Scatter(x=d_trend['날짜_표시'], y=d_trend['실패'], name='실패', mode='lines+markers', line=dict(color='#dc3545')))
+            fig_detail.update_layout(height=250, margin=dict(l=0, r=0, t=10, b=10), hovermode="x unified",
+                                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                                     yaxis=dict(dtick=1))
+            st.plotly_chart(fig_detail, width="stretch")
+
+        # 건별 실행 이력 테이블
+        detail_html = """
+<table class='agg-table'>
+    <thead>
+        <tr>
+            <th style='width: 100px;'>날짜</th>
+            <th style='width: 80px;'>수행시간</th>
+            <th style='width: 80px;'>상태</th>
+            <th style='width: 100px;'>구동시간</th>
+            <th>에러내용</th>
+        </tr>
+    </thead>
+    <tbody>
+"""
+        for _, r in detail.iterrows():
+            if r['상태'] == '성공':
+                stat_html = "<span style='color:#28a745; font-weight:bold;'>성공</span>"
+                err_html = "-"
+            else:
+                stat_html = "<span style='color:#dc3545; font-weight:bold;'>실패</span>"
+                err_html = f"<span class='error-red'>{r['에러내용']}</span>"
+            detail_html += f"""<tr>
+        <td>{r['날짜']}</td>
+        <td>{r['수행시간']}</td>
+        <td>{stat_html}</td>
+        <td>{r['구동시간']}초</td>
+        <td class='left-text'>{err_html}</td>
+    </tr>"""
+        detail_html += "</tbody></table>"
+        st.write(detail_html, unsafe_allow_html=True)
 
 c1, c2 = st.columns([1.5, 1])
 with c1:
