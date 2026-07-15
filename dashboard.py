@@ -204,13 +204,46 @@ def load_rpa_complete_data(start_date, end_date, seed_val=42):
     return pd.DataFrame(generated_data)
 
 # ==========================================
+# 3-1. NAS(WebDAV) 실데이터 로드
+#  - Streamlit Secrets에 [nas] 설정이 있으면 NAS의 로그 CSV를 읽어옴
+#  - 없거나 실패하면 기존 시뮬레이션 데이터로 동작
+# ==========================================
+@st.cache_data(ttl=60)
+def load_rpa_log_from_nas(start_date, end_date):
+    import requests, io
+    cfg = st.secrets["nas"]
+    r = requests.get(cfg["url"], auth=(cfg["user"], cfg["password"]), timeout=15)
+    r.raise_for_status()
+    df = pd.read_csv(io.StringIO(r.content.decode("utf-8-sig")))
+
+    # 규격: 날짜,수행시간,RPA명,실행주기,주관부서,상태,구동시간(초),에러내용
+    df = df.rename(columns={'구동시간(초)': '구동시간'})
+    df['날짜'] = pd.to_datetime(df['날짜']).dt.date
+    df = df[(df['날짜'] >= start_date) & (df['날짜'] <= end_date)].copy()
+    df['수행시간'] = df['수행시간'].astype(str).str.strip().str.slice(0, 5)
+    df['hour'] = df['수행시간'].str.slice(0, 2).astype(int)
+    df['날짜_표시'] = pd.to_datetime(df['날짜'].astype(str)).dt.strftime('%m월 %d일')
+    df['에러내용'] = df['에러내용'].fillna('-')
+    df['구동시간'] = pd.to_numeric(df['구동시간'], errors='coerce').fillna(0).astype(int)
+    return df.sort_values(['날짜', '수행시간']).reset_index(drop=True)
+
+# ==========================================
 # 4. 메인 로직 및 대시보드 구성
 # ==========================================
 today = now_kst().date()
 if 's_date' not in st.session_state: st.session_state.s_date = today - timedelta(days=6)
 if 'e_date' not in st.session_state: st.session_state.e_date = today
 
-f_df = load_rpa_complete_data(st.session_state.s_date, st.session_state.e_date)
+data_source = "시뮬레이션"
+if "nas" in st.secrets:
+    try:
+        f_df = load_rpa_log_from_nas(st.session_state.s_date, st.session_state.e_date)
+        data_source = "NAS 실데이터"
+    except Exception as ex:
+        st.warning(f"NAS 로그를 불러오지 못해 시뮬레이션 데이터로 표시합니다. ({type(ex).__name__})")
+        f_df = load_rpa_complete_data(st.session_state.s_date, st.session_state.e_date)
+else:
+    f_df = load_rpa_complete_data(st.session_state.s_date, st.session_state.e_date)
 
 col_left, col_right = st.columns([1, 1], vertical_alignment="center")
 
@@ -294,11 +327,14 @@ def get_agg_row(group):
         '주관부서': group['주관부서'].iloc[0]
     })
 
-agg_df = f_df.groupby('RPA명', sort=False).apply(get_agg_row, include_groups=False).reset_index()
-agg_df = agg_df.sort_values('수행시간').reset_index(drop=True)
-agg_df.insert(0, '순번', range(1, len(agg_df) + 1)) 
+if f_df.empty:
+    st.info("조회 기간에 실행 이력이 없습니다.")
+else:
+    agg_df = f_df.groupby('RPA명', sort=False).apply(get_agg_row, include_groups=False).reset_index()
+    agg_df = agg_df.sort_values('수행시간').reset_index(drop=True)
+    agg_df.insert(0, '순번', range(1, len(agg_df) + 1))
 
-table_html = f"""
+    table_html = f"""
 <table class='agg-table'>
     <thead>
         <tr>
@@ -314,8 +350,8 @@ table_html = f"""
     </thead>
     <tbody>
 """
-for _, row in agg_df.iterrows():
-    table_html += f"""<tr>
+    for _, row in agg_df.iterrows():
+        table_html += f"""<tr>
         <td>{row['순번']}</td>
         <td>{row['RPA명_html']}</td>
         <td>{row['실행주기']}</td>
@@ -325,8 +361,8 @@ for _, row in agg_df.iterrows():
         <td>{row['에러_html']}</td>
         <td><b>{row['주관부서']}</b></td>
     </tr>"""
-table_html += "</tbody></table>"
-st.write(table_html, unsafe_allow_html=True)
+    table_html += "</tbody></table>"
+    st.write(table_html, unsafe_allow_html=True)
 
 c1, c2 = st.columns([1.5, 1])
 with c1:
