@@ -300,12 +300,15 @@ with col_right:
         st.rerun()
     
     with btn_col[4]:
-        sub_col1, sub_col2 = st.columns([3, 1])
+        sub_col1, sub_col2, sub_col3 = st.columns([3, 1, 1])
         picked = sub_col1.date_input("날짜", [st.session_state.s_date, st.session_state.e_date], label_visibility="collapsed", key="date_picker_input")
         if sub_col2.button("조회"):
             if isinstance(picked, (list, tuple)) and len(picked) == 2:
                 st.session_state.s_date, st.session_state.e_date = picked[0], picked[1]
                 st.rerun()
+        if sub_col3.button("새로고침", help="로그아웃 없이 최신 로그를 다시 불러옵니다"):
+            st.cache_data.clear()
+            st.rerun()
 
     total_succ = len(f_df[f_df['상태'] == '성공'])
     total_fail = len(f_df[f_df['상태'] == '오류'])
@@ -391,7 +394,8 @@ else:
     # 상세 내역: 업무 선택 시 건별 실행 이력 표시
     # ==========================================
     with st.expander("🔍 RPA 상세 내역 보기 (업무별 실행 이력)"):
-        sel_rpa = st.selectbox("업무 선택", agg_df['RPA명'].tolist(), key="detail_rpa_select")
+        rpa_options = agg_df['RPA명'].tolist()
+        sel_rpa = st.selectbox("업무 선택", rpa_options)
         detail = f_df[f_df['RPA명'] == sel_rpa].sort_values(['날짜', '수행시간']).reset_index(drop=True)
 
         d_succ = len(detail[detail['상태'] == '성공'])
