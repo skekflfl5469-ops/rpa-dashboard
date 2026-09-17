@@ -100,14 +100,12 @@ def load_rpa_log_from_nas(start_date, end_date):
 
     # 규격: 날짜,수행시간,RPA명,실행주기,주관부서,상태,구동시간(초),에러내용
     df = df.rename(columns={'구동시간(초)': '구동시간'})
-    # 상태 표기 통일 (봇마다 표기가 달라도 집계 일치)
     df['상태'] = df['상태'].astype(str).str.strip().replace(
         {'실패': '오류', 'FAIL': '오류', 'Fail': '오류', 'fail': '오류',
          'ERROR': '오류', 'Error': '오류', 'error': '오류',
          'SUCCESS': '성공', 'Success': '성공', 'success': '성공'})
     df['날짜'] = pd.to_datetime(df['날짜']).dt.date
     df = df[(df['날짜'] >= start_date) & (df['날짜'] <= end_date)].copy()
-    # 수행시간을 HH:MM으로 정규화 (2:45 -> 02:45, 한 자리/두 자리 모두 처리)
     def _fmt_time(t):
         t = str(t).strip()
         if ':' in t:
