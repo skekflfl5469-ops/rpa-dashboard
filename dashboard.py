@@ -117,7 +117,14 @@ def load_rpa_log_from_nas(start_date, end_date):
          'SUCCESS': '성공', 'Success': '성공', 'success': '성공'})
     df['날짜'] = pd.to_datetime(df['날짜']).dt.date
     df = df[(df['날짜'] >= start_date) & (df['날짜'] <= end_date)].copy()
-    df['수행시간'] = df['수행시간'].astype(str).str.strip().str.slice(0, 5)
+    # 수행시간을 HH:MM으로 정규화 (2:45 -> 02:45, 한 자리/두 자리 모두 처리)
+    def _fmt_time(t):
+        t = str(t).strip()
+        if ':' in t:
+            hh, mm = t.split(':')[0], t.split(':')[1][:2]
+            return f"{int(hh):02d}:{mm.zfill(2)}"
+        return t
+    df['수행시간'] = df['수행시간'].apply(_fmt_time)
     df['hour'] = df['수행시간'].str.slice(0, 2).astype(int)
     df['날짜_표시'] = pd.to_datetime(df['날짜'].astype(str)).dt.strftime('%m월 %d일')
     df['에러내용'] = df['에러내용'].fillna('-')
