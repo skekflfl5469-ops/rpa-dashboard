@@ -6,13 +6,9 @@ from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 import base64
 
-# 서버 위치와 무관하게 항상 한국 시간 기준으로 동작
 def now_kst():
     return datetime.now(ZoneInfo("Asia/Seoul")).replace(tzinfo=None)
 
-# ==========================================
-# 1. 페이지 설정 및 디자인
-# ==========================================
 st.set_page_config(page_title="RPA DashBorad", layout="wide")
 
 def get_base64_image(image_path):
@@ -42,9 +38,6 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# ==========================================
-# 2. 로그인 (계정은 Secrets의 [passwords]에서 로드)
-# ==========================================
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'user_id' not in st.session_state:
@@ -54,7 +47,7 @@ def get_allowed_users():
     try:
         return dict(st.secrets["passwords"])
     except Exception:
-        return {"guest": "1234"}   # Secrets 미설정 시 최소 계정
+        return {}   
 
 def login():
     ALLOWED_USERS = get_allowed_users()
@@ -97,9 +90,6 @@ if not st.session_state.logged_in:
     login()
     st.stop()
 
-# ==========================================
-# 3. NAS(WebDAV) 로그 로드 — 유일한 데이터 소스
-# ==========================================
 @st.cache_data(ttl=60)
 def load_rpa_log_from_nas(start_date, end_date):
     import requests, io
@@ -131,9 +121,6 @@ def load_rpa_log_from_nas(start_date, end_date):
     df['구동시간'] = pd.to_numeric(df['구동시간'], errors='coerce').fillna(0).astype(int)
     return df.sort_values(['날짜', '수행시간']).reset_index(drop=True)
 
-# ==========================================
-# 4. 메인 로직
-# ==========================================
 today = now_kst().date()
 if 's_date' not in st.session_state: st.session_state.s_date = today - timedelta(days=6)
 if 'e_date' not in st.session_state: st.session_state.e_date = today
