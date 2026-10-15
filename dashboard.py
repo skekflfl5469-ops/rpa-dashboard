@@ -243,6 +243,8 @@ else:
         seq = mrow["순번"]
 
         logs = f_df[f_df["RPA명"] == name]
+        # 수행시간: 로그에서 가져옴 (가장 이른 수행시간), 로그 없으면 "-"
+        run_time = logs.sort_values("수행시간")["수행시간"].iloc[0] if len(logs) > 0 else "-"
         succ_count = len(logs[logs["상태"] == "성공"])
         fail_count = len(logs[logs["상태"] == "오류"])
         err_list = logs[logs["상태"] == "오류"]["에러내용"].unique()
@@ -275,23 +277,25 @@ else:
         <td>{seq}</td>
         <td><div class='left-text'>{name}</div></td>
         <td>{cycle}</td>
+        <td>{run_time}</td>
         <td>{status_html}</td>
         <td>{avg_cell}</td>
         <td>{err_cell}</td>
         <td><b>{dept}</b></td>
     </tr>""")
 
-    status_col_title = "오늘 상태" if is_today_view else "상태 (기간 합산)"
+    status_col_title = "상태" if is_today_view else "상태 (기간 합산)"
     table_html = f"""
 <table class='agg-table'>
     <thead>
         <tr>
             <th style='width: 50px;'>순번</th>
-            <th style='width: 360px;'>RPA명</th>
+            <th style='width: 340px;'>RPA명</th>
             <th style='width: 150px;'>실행주기</th>
-            <th style='width: 160px;'>{status_col_title}</th>
+            <th style='width: 80px;'>수행시간</th>
+            <th style='width: 150px;'>{status_col_title}</th>
             <th style='width: 100px;'>평균구동시간</th>
-            <th style='width: 360px;'>에러내용</th>
+            <th style='width: 340px;'>에러내용</th>
             <th style='width: 120px;'>주관부서</th>
         </tr>
     </thead>
