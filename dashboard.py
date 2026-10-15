@@ -119,6 +119,36 @@ def load_rpa_log_from_nas(start_date, end_date):
     df['구동시간'] = pd.to_numeric(df['구동시간'], errors='coerce').fillna(0).astype(int)
     return df.sort_values(['날짜', '수행시간']).reset_index(drop=True)
 
+# 업무 마스터 로드 (NAS의 업무마스터.csv) — 전체 RPA 리스트 + 주기
+@st.cache_data(ttl=300)
+def load_master_from_nas():
+    import requests, io
+    cfg = st.secrets["nas"]
+    master_url = cfg["url"].rsplit("/", 1)[0] + "/업무마스터.csv"
+    r = requests.get(master_url, auth=(cfg["user"], cfg["password"]), timeout=15)
+    r.raise_for_status()
+    m = pd.read_csv(io.StringIO(r.content.decode("utf-8-sig")), dtype=str)
+    for c in m.columns:
+        m[c] = m[c].astype(str).str.replace("﻿", "", regex=False).str.strip()
+    m["순번"] = pd.to_numeric(m["순번"], errors="coerce").fillna(0).astype(int)
+    return m
+
+# 주기와 날짜로 '그 날이 구동일인지' 판정
+def is_run_day(cycle, d):
+    c = str(cycle)
+    wd = d.weekday()  # 월=0 ... 일=6
+    if "7회/주" in c:
+        return True
+    if "5회/주" in c:
+        return wd < 5
+    if "2,4주차 월요일" in c:
+        return wd == 0 and (8 <= d.day <= 14 or 22 <= d.day <= 28)
+    if "1회/월(01일)" in c:
+        return d.day == 1
+    if "1회/월(10일)" in c:
+        return d.day == 10
+    return True
+
 today = now_kst().date()
 if 's_date' not in st.session_state: st.session_state.s_date = today - timedelta(days=6)
 if 'e_date' not in st.session_state: st.session_state.e_date = today
@@ -128,6 +158,11 @@ try:
 except Exception as ex:
     st.error(f"로그 데이터를 불러오지 못했습니다. ({type(ex).__name__})")
     f_df = pd.DataFrame(columns=['RPA명', '실행주기', '수행시간', '주관부서', '날짜', '상태', '구동시간', '에러내용', 'hour', '날짜_표시'])
+
+try:
+    master_df = load_master_from_nas()
+except Exception:
+    master_df = pd.DataFrame(columns=['순번', 'RPA명', '주관부서', '실행주기'])
 
 col_left, col_right = st.columns([1, 1], vertical_alignment="center")
 
@@ -192,62 +227,83 @@ if not f_df.empty:
     dl_col.download_button("📥 로그 다운로드", data=log_csv,
         file_name=f"rpa_log_{st.session_state.s_date}_{st.session_state.e_date}.csv", mime="text/csv")
 
-def get_agg_row(group):
-    succ_count = len(group[group['상태'] == '성공'])
-    fail_count = len(group[group['상태'] == '오류'])
-    error_list = group[group['상태'] == '오류']['에러내용'].unique()
-    err_txt = error_list[0] if len(error_list) > 0 else "-"
-    avg_time = int(group['구동시간'].mean()) if len(group) > 0 else 0
-    return pd.Series({
-        'RPA명_html': f"<div class='left-text'>{group.name}</div>",
-        '실행주기': group['실행주기'].iloc[0],
-        '수행시간': group['수행시간'].iloc[0],
-        '상태_html': f"<span style='color:#28a745; font-weight:bold;'>성공({succ_count})</span>, <span style='color:#dc3545; font-weight:bold;'>실패({fail_count})</span>",
-        '평균': f"{avg_time}초",
-        '에러_html': f"<div class='error-red'>{err_txt}</div>",
-        '주관부서': group['주관부서'].iloc[0]
-    })
+# 조회가 '오늘 하루'인지 여부 → 오늘이면 구동일/로그없음 판정 모드
+is_today_view = (st.session_state.s_date == today == st.session_state.e_date)
 
-if f_df.empty:
-    st.info("조회 기간에 실행 이력이 없습니다.")
+if master_df.empty:
+    st.warning("업무 마스터(업무마스터.csv)를 불러오지 못했습니다. NAS의 RPA_log 폴더에 파일이 있는지 확인하세요.")
+    rpa_options = []
 else:
-    agg_df = f_df.groupby('RPA명', sort=False).apply(get_agg_row, include_groups=False).reset_index()
-    agg_df = agg_df.sort_values('수행시간').reset_index(drop=True)
-    agg_df.insert(0, '순번', range(1, len(agg_df) + 1))
+    rpa_options = master_df.sort_values("순번")["RPA명"].tolist()
+    rows_html = []
+    for _, mrow in master_df.sort_values("순번").iterrows():
+        name = mrow["RPA명"]
+        cycle = mrow["실행주기"]
+        dept = mrow["주관부서"]
+        seq = mrow["순번"]
 
-    table_html = """
+        logs = f_df[f_df["RPA명"] == name]
+        succ_count = len(logs[logs["상태"] == "성공"])
+        fail_count = len(logs[logs["상태"] == "오류"])
+        err_list = logs[logs["상태"] == "오류"]["에러내용"].unique()
+        err_txt = err_list[0] if len(err_list) > 0 else "-"
+
+        if is_today_view:
+            if not is_run_day(cycle, today):
+                status_html = "<span style='color:#888;'>구동일 아님</span>"
+                err_cell = "-"
+            elif len(logs) == 0:
+                status_html = "<span style='color:#e67e22; font-weight:bold;'>로그 없음</span>"
+                err_cell = "-"
+            else:
+                status_html = (f"<span style='color:#28a745; font-weight:bold;'>성공({succ_count})</span>, "
+                               f"<span style='color:#dc3545; font-weight:bold;'>실패({fail_count})</span>")
+                err_cell = f"<div class='error-red'>{err_txt}</div>" if fail_count > 0 else "-"
+        else:
+            if len(logs) == 0:
+                status_html = "<span style='color:#888;'>-</span>"
+                err_cell = "-"
+            else:
+                status_html = (f"<span style='color:#28a745; font-weight:bold;'>성공({succ_count})</span>, "
+                               f"<span style='color:#dc3545; font-weight:bold;'>실패({fail_count})</span>")
+                err_cell = f"<div class='error-red'>{err_txt}</div>" if fail_count > 0 else "-"
+
+        avg_time = int(logs["구동시간"].mean()) if len(logs) > 0 else 0
+        avg_cell = f"{avg_time}초" if len(logs) > 0 else "-"
+
+        rows_html.append(f"""<tr>
+        <td>{seq}</td>
+        <td><div class='left-text'>{name}</div></td>
+        <td>{cycle}</td>
+        <td>{status_html}</td>
+        <td>{avg_cell}</td>
+        <td>{err_cell}</td>
+        <td><b>{dept}</b></td>
+    </tr>""")
+
+    status_col_title = "오늘 상태" if is_today_view else "상태 (기간 합산)"
+    table_html = f"""
 <table class='agg-table'>
     <thead>
         <tr>
             <th style='width: 50px;'>순번</th>
-            <th style='width: 320px;'>RPA명</th>
-            <th style='width: 100px;'>실행주기</th>
-            <th style='width: 80px;'>수행시간</th>
-            <th style='width: 160px;'>상태 (기간 합산)</th>
+            <th style='width: 360px;'>RPA명</th>
+            <th style='width: 150px;'>실행주기</th>
+            <th style='width: 160px;'>{status_col_title}</th>
             <th style='width: 100px;'>평균구동시간</th>
-            <th style='width: 380px;'>에러내용</th>
+            <th style='width: 360px;'>에러내용</th>
             <th style='width: 120px;'>주관부서</th>
         </tr>
     </thead>
     <tbody>
 """
-    for _, row in agg_df.iterrows():
-        table_html += f"""<tr>
-        <td>{row['순번']}</td>
-        <td>{row['RPA명_html']}</td>
-        <td>{row['실행주기']}</td>
-        <td>{row['수행시간']}</td>
-        <td>{row['상태_html']}</td>
-        <td>{row['평균']}</td>
-        <td>{row['에러_html']}</td>
-        <td><b>{row['주관부서']}</b></td>
-    </tr>"""
+    table_html += "".join(rows_html)
     table_html += "</tbody></table>"
     st.write(table_html, unsafe_allow_html=True)
 
+if rpa_options:
     # 상세 내역
     with st.expander("🔍 RPA 상세 내역 보기 (업무별 실행 이력)"):
-        rpa_options = agg_df['RPA명'].tolist()
         sel_rpa = st.selectbox("업무 선택", rpa_options)
         detail = f_df[f_df['RPA명'] == sel_rpa].sort_values(['날짜', '수행시간']).reset_index(drop=True)
 
