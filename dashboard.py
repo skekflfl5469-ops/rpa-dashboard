@@ -227,8 +227,9 @@ if not f_df.empty:
     dl_col.download_button("📥 로그 다운로드", data=log_csv,
         file_name=f"rpa_log_{st.session_state.s_date}_{st.session_state.e_date}.csv", mime="text/csv")
 
-# 조회가 '오늘 하루'인지 여부 → 오늘이면 구동일/로그없음 판정 모드
-is_today_view = (st.session_state.s_date == today == st.session_state.e_date)
+# 조회가 '하루'인지 여부 → 하루면(과거 포함) 그날 기준 구동일/로그없음 판정
+is_single_day = (st.session_state.s_date == st.session_state.e_date)
+view_day = st.session_state.s_date  # 판정 기준 날짜 = 조회한 그 날
 
 if master_df.empty:
     st.warning("업무 마스터(업무마스터.csv)를 불러오지 못했습니다. NAS의 RPA_log 폴더에 파일이 있는지 확인하세요.")
@@ -250,8 +251,8 @@ else:
         err_list = logs[logs["상태"] == "오류"]["에러내용"].unique()
         err_txt = err_list[0] if len(err_list) > 0 else "-"
 
-        if is_today_view:
-            if not is_run_day(cycle, today):
+        if is_single_day:
+            if not is_run_day(cycle, view_day):
                 status_html = "<span style='color:#888;'>구동일 아님</span>"
                 err_cell = "-"
             elif len(logs) == 0:
@@ -284,7 +285,7 @@ else:
         <td><b>{dept}</b></td>
     </tr>""")
 
-    status_col_title = "상태" if is_today_view else "상태 (기간 합산)"
+    status_col_title = "상태" if is_single_day else "상태 (기간 합산)"
     table_html = f"""
 <table class='agg-table'>
     <thead>
