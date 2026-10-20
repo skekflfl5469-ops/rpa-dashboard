@@ -116,6 +116,12 @@ def load_rpa_log_from_nas(start_date, end_date):
     df['hour'] = df['수행시간'].str.slice(0, 2).astype(int)
     df['날짜_표시'] = pd.to_datetime(df['날짜'].astype(str)).dt.strftime('%m월 %d일')
     df['에러내용'] = df['에러내용'].fillna('-')
+    # 예전 8칸 데이터엔 수신인/참조인이 없으므로 없으면 빈 열 추가
+    for _c in ['수신인', '참조인']:
+        if _c not in df.columns:
+            df[_c] = ''
+    df['수신인'] = df['수신인'].fillna('')
+    df['참조인'] = df['참조인'].fillna('')
     df['구동시간'] = pd.to_numeric(df['구동시간'], errors='coerce').fillna(0).astype(int)
     return df.sort_values(['날짜', '수행시간']).reset_index(drop=True)
 
@@ -221,7 +227,7 @@ title_col.write(f"#### 📋 항목별 구동 현황 ({st.session_state.s_date} ~
 if not f_df.empty:
     log_df = f_df.copy()
     log_df['날짜'] = log_df['날짜'].astype(str)
-    log_df = log_df.sort_values(['날짜', '수행시간'])[['날짜', '수행시간', 'RPA명', '실행주기', '주관부서', '상태', '구동시간', '에러내용']]
+    log_df = log_df.sort_values(['날짜', '수행시간'])[['날짜', '수행시간', 'RPA명', '실행주기', '주관부서', '상태', '구동시간', '에러내용', '수신인', '참조인']]
     log_df = log_df.rename(columns={'구동시간': '구동시간(초)'})
     log_csv = log_df.to_csv(index=False).encode('utf-8-sig')
     dl_col.download_button("📥 로그 다운로드", data=log_csv,
@@ -274,6 +280,15 @@ else:
         avg_time = int(logs["구동시간"].mean()) if len(logs) > 0 else 0
         avg_cell = f"{avg_time}초" if len(logs) > 0 else "-"
 
+        # 수신인/참조인: 로그에 값이 있는 건(주로 성공 건) 중 가장 최근 것
+        recv_cell, cc_cell = "-", "-"
+        if len(logs) > 0 and '수신인' in logs.columns:
+            _with = logs[logs['수신인'].astype(str).str.strip() != '']
+            if len(_with) > 0:
+                _last = _with.sort_values(['날짜', '수행시간']).iloc[-1]
+                recv_cell = str(_last.get('수신인', '')).replace('/', ', ') or "-"
+                cc_cell = str(_last.get('참조인', '')).replace('/', ', ') or "-"
+
         rows_html.append(f"""<tr>
         <td>{seq}</td>
         <td><div class='left-text'>{name}</div></td>
@@ -282,6 +297,8 @@ else:
         <td>{status_html}</td>
         <td>{avg_cell}</td>
         <td>{err_cell}</td>
+        <td class='left-text'>{recv_cell}</td>
+        <td class='left-text'>{cc_cell}</td>
         <td><b>{dept}</b></td>
     </tr>""")
 
@@ -296,7 +313,9 @@ else:
             <th style='width: 80px;'>수행시간</th>
             <th style='width: 150px;'>{status_col_title}</th>
             <th style='width: 100px;'>평균구동시간</th>
-            <th style='width: 340px;'>에러내용</th>
+            <th style='width: 300px;'>에러내용</th>
+            <th style='width: 160px;'>수신인</th>
+            <th style='width: 200px;'>참조인</th>
             <th style='width: 120px;'>주관부서</th>
         </tr>
     </thead>
