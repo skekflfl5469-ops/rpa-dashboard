@@ -281,6 +281,9 @@ else:
         avg_cell = f"{avg_time}초" if len(logs) > 0 else "-"
 
         # 수신인/참조인: 로그에 값이 있는 건(주로 성공 건) 중 가장 최근 것
+        # ※ 참조인(cc_cell)은 현재 표에서 '숨김' 상태입니다. 데이터는 그대로 읽고 있으니,
+        #    다시 보이게 하려면 (1) <thead>에 참조인 <th> 1줄, (2) 바디 <tr>에 참조인 <td> 1줄만 추가하면 됩니다.
+        #    (각 위치에 "[참조인 열]" 주석 표시해 둠)
         recv_cell, cc_cell = "-", "-"
         if len(logs) > 0 and '수신인' in logs.columns:
             _with = logs[logs['수신인'].astype(str).str.strip() != '']
@@ -298,7 +301,6 @@ else:
         <td>{avg_cell}</td>
         <td>{err_cell}</td>
         <td class='left-text'>{recv_cell}</td>
-        <td class='left-text'>{cc_cell}</td>
         <td><b>{dept}</b></td>
     </tr>""")
 
@@ -315,7 +317,6 @@ else:
             <th style='width: 100px;'>평균구동시간</th>
             <th style='width: 300px;'>에러내용</th>
             <th style='width: 160px;'>수신인</th>
-            <th style='width: 200px;'>참조인</th>
             <th style='width: 120px;'>주관부서</th>
         </tr>
     </thead>
