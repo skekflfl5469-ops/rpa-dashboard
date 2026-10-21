@@ -98,9 +98,9 @@ def load_rpa_log_from_nas(start_date, end_date):
     r = requests.get(cfg["url"], auth=(cfg["user"], cfg["password"]), timeout=15)
     r.raise_for_status()
 
-    # 표준 10칸 규격: 날짜,수행시간,RPA명,실행주기,주관부서,상태,구동시간(초),에러내용,수신인,참조인
+    # 표준 11칸 규격: 날짜,수행시간,RPA명,실행주기,주관부서,상태,구동시간(초),에러내용,수신인,참조인,재기동
     STD = ["날짜", "수행시간", "RPA명", "실행주기", "주관부서",
-           "상태", "구동시간(초)", "에러내용", "수신인", "참조인"]
+           "상태", "구동시간(초)", "에러내용", "수신인", "참조인", "재기동"]
     # index_col=False: 로그 원본에서 열(예: 참조인)을 지워 헤더와 데이터 칸 수가
     #   어긋나도 열이 한 칸씩 밀리지 않게 함(여분 칸은 버림). 과거 ValueError 방지.
     df = pd.read_csv(io.StringIO(r.content.decode("utf-8-sig")),
@@ -137,6 +137,7 @@ def load_rpa_log_from_nas(start_date, end_date):
     df['에러내용'] = df['에러내용'].replace('', '-').fillna('-')
     df['수신인'] = df['수신인'].fillna('')
     df['참조인'] = df['참조인'].fillna('')
+    df['재기동'] = df['재기동'].fillna('')
     df['구동시간'] = pd.to_numeric(df['구동시간'], errors='coerce').fillna(0).astype(int)
     return df.sort_values(['날짜', '수행시간']).reset_index(drop=True)
 
@@ -276,23 +277,20 @@ else:
         # 수행시간: 로그에서 가져옴 (가장 이른 수행시간), 로그 없으면 "-"
         run_time = logs.sort_values("수행시간")["수행시간"].iloc[0] if len(logs) > 0 else "-"
 
-        # --- 재기동(같은 날 재실행) 자동 인식 ---
-        # 규칙: 날짜별로 그 업무의 수행시간이 2개 이상이면, 첫 실행 이후를 '재기동'으로 봄
-        #       (로그·봇은 수정하지 않고 대시보드가 로그 행만으로 판별)
-        restart_cnt = 0
-        if len(logs) > 0:
-            for _d, _g in logs.groupby("날짜"):
-                _ts = sorted(_g["수행시간"].tolist())
-                if len(_ts) >= 2:
-                    restart_cnt += len(_ts) - 1
-        if is_single_day and restart_cnt > 0:
-            _ts_today = sorted(logs["수행시간"].tolist())
-            run_time_disp = run_time + ("<br><span style='color:#2457C5;font-size:11px;'>↻ 재기동 "
-                                        + ", ".join(_ts_today[1:]) + "</span>")
-        elif (not is_single_day) and restart_cnt > 0:
-            run_time_disp = run_time + f"<br><span style='color:#2457C5;font-size:11px;'>↻ 재기동 {restart_cnt}회</span>"
+        # --- 재기동: 로그의 '재기동' 칸(업로더가 채움)을 그대로 읽음 ---
+        #   재기동 칸에 값(재기동 시각)이 들어있는 행 = 그날 2번째 이후 실행
+        if len(logs) > 0 and '재기동' in logs.columns:
+            _restart = logs[logs['재기동'].astype(str).str.strip() != '']
         else:
-            run_time_disp = run_time
+            _restart = logs.iloc[0:0]
+        # 재기동 전용 열 표시 (단일일: 재기동 시각들 / 기간: 재기동 횟수 / 없으면 "-")
+        if is_single_day and len(_restart) > 0:
+            _times = sorted(_restart['재기동'].astype(str).str.strip().tolist())
+            restart_cell = "<span style='color:#2457C5; font-weight:bold;'>↻ " + ", ".join(_times) + "</span>"
+        elif (not is_single_day) and len(_restart) > 0:
+            restart_cell = f"<span style='color:#2457C5; font-weight:bold;'>↻ {len(_restart)}회</span>"
+        else:
+            restart_cell = "-"
         succ_count = len(logs[logs["상태"] == "성공"])
         fail_count = len(logs[logs["상태"] == "오류"])
         err_list = logs[logs["상태"] == "오류"]["에러내용"].unique()
@@ -337,7 +335,8 @@ else:
         <td>{seq}</td>
         <td><div class='left-text'>{name}</div></td>
         <td>{cycle}</td>
-        <td>{run_time_disp}</td>
+        <td>{run_time}</td>
+        <td>{restart_cell}</td>
         <td>{status_html}</td>
         <td>{avg_cell}</td>
         <td>{err_cell}</td>
@@ -355,6 +354,7 @@ else:
             <th style='width: 340px;'>RPA명</th>
             <th style='width: 150px;'>실행주기</th>
             <th style='width: 80px;'>수행시간</th>
+            <th style='width: 110px;'>재기동</th>
             <th style='width: 150px;'>{status_col_title}</th>
             <th style='width: 100px;'>평균구동시간</th>
             <th style='width: 300px;'>에러내용</th>
