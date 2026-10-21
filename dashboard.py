@@ -96,30 +96,44 @@ def load_rpa_log_from_nas(start_date, end_date):
     cfg = st.secrets["nas"]
     r = requests.get(cfg["url"], auth=(cfg["user"], cfg["password"]), timeout=15)
     r.raise_for_status()
-    df = pd.read_csv(io.StringIO(r.content.decode("utf-8-sig")))
 
-    # 규격: 날짜,수행시간,RPA명,실행주기,주관부서,상태,구동시간(초),에러내용
+    # 표준 10칸 규격: 날짜,수행시간,RPA명,실행주기,주관부서,상태,구동시간(초),에러내용,수신인,참조인
+    STD = ["날짜", "수행시간", "RPA명", "실행주기", "주관부서",
+           "상태", "구동시간(초)", "에러내용", "수신인", "참조인"]
+    # index_col=False: 로그 원본에서 열(예: 참조인)을 지워 헤더와 데이터 칸 수가
+    #   어긋나도 열이 한 칸씩 밀리지 않게 함(여분 칸은 버림). 과거 ValueError 방지.
+    df = pd.read_csv(io.StringIO(r.content.decode("utf-8-sig")),
+                     dtype=str, keep_default_na=False,
+                     index_col=False, on_bad_lines="skip")
+    # 표준 스키마로 정규화: 없는 열은 빈값으로 추가 → 표준 순서로 고정(여분 열 버림)
+    for _c in STD:
+        if _c not in df.columns:
+            df[_c] = ""
+    df = df[STD].copy()
+
     df = df.rename(columns={'구동시간(초)': '구동시간'})
     df['상태'] = df['상태'].astype(str).str.strip().replace(
         {'실패': '오류', 'FAIL': '오류', 'Fail': '오류', 'fail': '오류',
          'ERROR': '오류', 'Error': '오류', 'error': '오류',
          'SUCCESS': '성공', 'Success': '성공', 'success': '성공'})
-    df['날짜'] = pd.to_datetime(df['날짜']).dt.date
+    # 날짜: 깨진 값은 NaT 처리 후 해당 행 제거(한 줄 깨져도 전체가 안 죽게)
+    df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce').dt.date
+    df = df[df['날짜'].notna()].copy()
     df = df[(df['날짜'] >= start_date) & (df['날짜'] <= end_date)].copy()
     def _fmt_time(t):
         t = str(t).strip()
         if ':' in t:
             hh, mm = t.split(':')[0], t.split(':')[1][:2]
-            return f"{int(hh):02d}:{mm.zfill(2)}"
+            try:
+                return f"{int(hh):02d}:{mm.zfill(2)}"
+            except ValueError:
+                return t
         return t
     df['수행시간'] = df['수행시간'].apply(_fmt_time)
-    df['hour'] = df['수행시간'].str.slice(0, 2).astype(int)
+    # hour: 숫자가 아니면 0 (밀린 데이터가 들어와도 int() 오류 안 나게)
+    df['hour'] = pd.to_numeric(df['수행시간'].str.slice(0, 2), errors='coerce').fillna(0).astype(int)
     df['날짜_표시'] = pd.to_datetime(df['날짜'].astype(str)).dt.strftime('%m월 %d일')
-    df['에러내용'] = df['에러내용'].fillna('-')
-    # 예전 8칸 데이터엔 수신인/참조인이 없으므로 없으면 빈 열 추가
-    for _c in ['수신인', '참조인']:
-        if _c not in df.columns:
-            df[_c] = ''
+    df['에러내용'] = df['에러내용'].replace('', '-').fillna('-')
     df['수신인'] = df['수신인'].fillna('')
     df['참조인'] = df['참조인'].fillna('')
     df['구동시간'] = pd.to_numeric(df['구동시간'], errors='coerce').fillna(0).astype(int)
@@ -301,6 +315,7 @@ else:
         <td>{avg_cell}</td>
         <td>{err_cell}</td>
         <td class='left-text'>{recv_cell}</td>
+        <!-- [참조인 열] 복구: 다음 줄을 살리면 됨 → <td class='left-text'>{{cc_cell}}</td> -->
         <td><b>{dept}</b></td>
     </tr>""")
 
@@ -317,6 +332,7 @@ else:
             <th style='width: 100px;'>평균구동시간</th>
             <th style='width: 300px;'>에러내용</th>
             <th style='width: 160px;'>수신인</th>
+            <!-- [참조인 열] 복구: 다음 줄을 살리면 됨 → <th style='width: 200px;'>참조인</th> -->
             <th style='width: 120px;'>주관부서</th>
         </tr>
     </thead>
