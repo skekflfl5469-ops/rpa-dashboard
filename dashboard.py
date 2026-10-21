@@ -98,9 +98,9 @@ def load_rpa_log_from_nas(start_date, end_date):
     r = requests.get(cfg["url"], auth=(cfg["user"], cfg["password"]), timeout=15)
     r.raise_for_status()
 
-    # 표준 11칸 규격: 날짜,수행시간,RPA명,실행주기,주관부서,상태,구동시간(초),에러내용,수신인,참조인,재기동
+    # 표준 11칸 규격: 날짜,수행시간,RPA명,실행주기,주관부서,상태,재기동,구동시간(초),에러내용,수신인,참조인
     STD = ["날짜", "수행시간", "RPA명", "실행주기", "주관부서",
-           "상태", "구동시간(초)", "에러내용", "수신인", "참조인", "재기동"]
+           "상태", "재기동", "구동시간(초)", "에러내용", "수신인", "참조인"]
     # index_col=False: 로그 원본에서 열(예: 참조인)을 지워 헤더와 데이터 칸 수가
     #   어긋나도 열이 한 칸씩 밀리지 않게 함(여분 칸은 버림). 과거 ValueError 방지.
     df = pd.read_csv(io.StringIO(r.content.decode("utf-8-sig")),
@@ -336,8 +336,8 @@ else:
         <td><div class='left-text'>{name}</div></td>
         <td>{cycle}</td>
         <td>{run_time}</td>
-        <td>{restart_cell}</td>
         <td>{status_html}</td>
+        <td>{restart_cell}</td>
         <td>{avg_cell}</td>
         <td>{err_cell}</td>
         <td class='left-text'>{recv_cell}</td>
@@ -354,8 +354,8 @@ else:
             <th style='width: 340px;'>RPA명</th>
             <th style='width: 150px;'>실행주기</th>
             <th style='width: 80px;'>수행시간</th>
-            <th style='width: 110px;'>재기동</th>
             <th style='width: 150px;'>{status_col_title}</th>
+            <th style='width: 110px;'>재기동</th>
             <th style='width: 100px;'>평균구동시간</th>
             <th style='width: 300px;'>에러내용</th>
             <th style='width: 160px;'>수신인</th>
