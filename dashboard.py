@@ -272,6 +272,7 @@ else:
         cycle = mrow["실행주기"]
         dept = mrow["주관부서"]
         seq = mrow["순번"]
+        run_sched = (str(mrow.get("실행시간", "")).strip() or "-") if "실행시간" in mrow else "-"  # 마스터의 예정 실행시간
 
         logs = f_df[f_df["RPA명"] == name]
         # 수행시간: 로그에서 가져옴 (가장 이른 수행시간), 로그 없으면 "-"
@@ -335,6 +336,7 @@ else:
         <td>{seq}</td>
         <td><div class='left-text'>{name}</div></td>
         <td>{cycle}</td>
+        <td>{run_sched}</td>
         <td>{run_time}</td>
         <td>{status_html}</td>
         <td>{restart_cell}</td>
@@ -353,6 +355,7 @@ else:
             <th style='width: 50px;'>순번</th>
             <th style='width: 340px;'>RPA명</th>
             <th style='width: 150px;'>실행주기</th>
+            <th style='width: 80px;'>실행시간</th>
             <th style='width: 80px;'>수행시간</th>
             <th style='width: 150px;'>{status_col_title}</th>
             <th style='width: 110px;'>재기동</th>
