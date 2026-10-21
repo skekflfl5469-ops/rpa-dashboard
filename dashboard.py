@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 import base64
+import re
 
 def now_kst():
     return datetime.now(ZoneInfo("Asia/Seoul")).replace(tzinfo=None)
@@ -167,6 +168,14 @@ def is_run_day(cycle, d):
         return d.day == 1
     if "1회/월(10일)" in c:
         return d.day == 10
+    # N회/주(월,목)처럼 괄호 안에 요일이 콤마로 나열된 경우 → 그 요일에만 구동
+    #   (월~금 같은 '~' 범위형은 위의 5회/주에서 이미 처리하므로 제외)
+    m = re.search(r'\(([^)]*)\)', c)
+    if "회/주" in c and m and '~' not in m.group(1):
+        _wmap = {'월': 0, '화': 1, '수': 2, '목': 3, '금': 4, '토': 5, '일': 6}
+        _days = [_wmap[ch] for ch in m.group(1) if ch in _wmap]
+        if _days:
+            return wd in _days
     return True
 
 today = now_kst().date()
@@ -266,6 +275,24 @@ else:
         logs = f_df[f_df["RPA명"] == name]
         # 수행시간: 로그에서 가져옴 (가장 이른 수행시간), 로그 없으면 "-"
         run_time = logs.sort_values("수행시간")["수행시간"].iloc[0] if len(logs) > 0 else "-"
+
+        # --- 재기동(같은 날 재실행) 자동 인식 ---
+        # 규칙: 날짜별로 그 업무의 수행시간이 2개 이상이면, 첫 실행 이후를 '재기동'으로 봄
+        #       (로그·봇은 수정하지 않고 대시보드가 로그 행만으로 판별)
+        restart_cnt = 0
+        if len(logs) > 0:
+            for _d, _g in logs.groupby("날짜"):
+                _ts = sorted(_g["수행시간"].tolist())
+                if len(_ts) >= 2:
+                    restart_cnt += len(_ts) - 1
+        if is_single_day and restart_cnt > 0:
+            _ts_today = sorted(logs["수행시간"].tolist())
+            run_time_disp = run_time + ("<br><span style='color:#2457C5;font-size:11px;'>↻ 재기동 "
+                                        + ", ".join(_ts_today[1:]) + "</span>")
+        elif (not is_single_day) and restart_cnt > 0:
+            run_time_disp = run_time + f"<br><span style='color:#2457C5;font-size:11px;'>↻ 재기동 {restart_cnt}회</span>"
+        else:
+            run_time_disp = run_time
         succ_count = len(logs[logs["상태"] == "성공"])
         fail_count = len(logs[logs["상태"] == "오류"])
         err_list = logs[logs["상태"] == "오류"]["에러내용"].unique()
@@ -310,7 +337,7 @@ else:
         <td>{seq}</td>
         <td><div class='left-text'>{name}</div></td>
         <td>{cycle}</td>
-        <td>{run_time}</td>
+        <td>{run_time_disp}</td>
         <td>{status_html}</td>
         <td>{avg_cell}</td>
         <td>{err_cell}</td>
